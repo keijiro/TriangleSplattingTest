@@ -1,0 +1,42 @@
+// Each #pragma kernel specifies a name for a kernel function.
+#pragma kernel CalculateDepths
+
+// Define a struct for triangle data
+struct TriangleData
+{
+    uint v0, v1, v2;
+    float depth;
+};
+
+// Input buffers
+StructuredBuffer<float3> Vertices;
+
+// Output/Input buffer for triangle data
+RWStructuredBuffer<TriangleData> TriangleDataBuffer;
+
+// Uniforms
+float4x4 ViewMatrix;
+float3 CameraWorldPos;
+
+[numthreads(64, 1, 1)]
+void CalculateDepths (uint id : SV_DispatchThreadID)
+{
+    TriangleData tri = TriangleDataBuffer[id];
+
+    // Get world positions of triangle vertices
+    float3 p0_world = Vertices[tri.v0];
+    float3 p1_world = Vertices[tri.v1];
+    float3 p2_world = Vertices[tri.v2];
+
+    // Calculate centroid in world space
+    float3 centroid_world = (p0_world + p1_world + p2_world) / 3.0f;
+
+    // Calculate depth (distance from camera, or view-space Z)
+    // For transparency sorting, we typically sort from back to front.
+    // Using negative view-space Z or distance from camera can work.
+    // Here, we use negative view-space Z for back-to-front sorting.
+    float3 centroid_view = mul(ViewMatrix, float4(centroid_world, 1.0f)).xyz;
+    tri.depth = -centroid_view.z; // Negative Z for back-to-front sorting
+
+    TriangleDataBuffer[id] = tri;
+}

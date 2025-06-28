@@ -3,20 +3,27 @@ using UnityEngine;
 using System.IO;
 using System.Globalization;
 
+public struct OffData
+{
+    public Vector3[] vertices;
+    public Color[] colors;
+    public int[] triangleIndices;
+    public int triangleCount;
+}
+
 public static class OffImporter
 {
-    public static Mesh Import(string filePath)
+    public static OffData Import(string filePath)
     {
         if (!File.Exists(filePath))
         {
             Debug.LogError($"File not found: {filePath}");
-            return null;
+            return new OffData();
         }
 
         var lines = File.ReadAllLines(filePath);
         var lineIndex = 0;
 
-        // Header
         var header = lines[lineIndex++].Trim().ToUpper();
         var hasColor = (header == "COFF");
 
@@ -43,7 +50,7 @@ public static class OffImporter
             if (lineIndex >= lines.Length)
             {
                 Debug.LogError("Unexpected end of file while reading vertices.");
-                return null;
+                return new OffData();
             }
 
             var line = lines[lineIndex++];
@@ -72,7 +79,7 @@ public static class OffImporter
             if (lineIndex >= lines.Length)
             {
                 Debug.LogError("Unexpected end of file while reading faces.");
-                return null;
+                return new OffData();
             }
 
             var line = lines[lineIndex++];
@@ -108,16 +115,12 @@ public static class OffImporter
             }
         }
 
-        // Create Mesh
-        var mesh = new Mesh { name = Path.GetFileNameWithoutExtension(filePath) };
-        mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
-        mesh.vertices = meshVertices;
-        mesh.triangles = meshTriangles;
-        mesh.colors = meshColors;
-
-        mesh.RecalculateNormals();
-        mesh.RecalculateBounds();
-
-        return mesh;
+        return new OffData
+        {
+            vertices = meshVertices,
+            colors = meshColors,
+            triangleIndices = meshTriangles,
+            triangleCount = faceCount
+        };
     }
 }
