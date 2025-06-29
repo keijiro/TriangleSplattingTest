@@ -1,5 +1,7 @@
 # Triangle Splatting Importer
 
+![Screenshot](https://github.com/user-attachments/assets/a76de5e0-df61-4a10-b57f-2d2fb5e4f043)
+
 This project implements a system for importing `.off` files generated as a
 "Byproduct of the Triangle-Based Representation" from the "Triangle Splatting"
 paper into Unity.
