@@ -80,15 +80,26 @@ public class OffImporter : ScriptedImporter
             lineIndex++;
         }
 
-        // Sort faces by centroid for spatial locality
-        allFaces.Sort((a, b) =>
+        // Calculate overall bounds of the model
+        Bounds modelBounds = new Bounds(vertices[0], Vector3.zero);
+        foreach (var v in vertices)
         {
-            var compareX = a.centroid.x.CompareTo(b.centroid.x);
-            if (compareX != 0) return compareX;
-            var compareY = a.centroid.y.CompareTo(b.centroid.y);
-            if (compareY != 0) return compareY;
-            return a.centroid.z.CompareTo(b.centroid.z);
-        });
+            modelBounds.Encapsulate(v);
+        }
+
+        // Build Octree
+        OctreeNode rootNode = new OctreeNode(modelBounds);
+        foreach (var face in allFaces)
+        {
+            rootNode.AddFace(face);
+        }
+
+        // Max faces per node is an approximation for MAX_VERTICES_PER_CHUNK / 3
+        // We use 65535 / 3 = 21845 as a rough estimate
+        const int MAX_FACES_PER_NODE = 20000; 
+        const int MAX_OCTREE_DEPTH = 10; // Limit depth to prevent excessive subdivision
+
+        rootNode.Build(MAX_OCTREE_DEPTH, MAX_FACES_PER_NODE);
 
         const int MAX_VERTICES_PER_CHUNK = 65535; // Max vertices for 16-bit index
 
@@ -100,43 +111,129 @@ public class OffImporter : ScriptedImporter
         var material = new Material(Shader.Find("Unlit/VertexColor"));
         context.AddObjectToAsset("UnlitVertexColorMaterial", material);
 
-        var currentVertices = new System.Collections.Generic.List<Vector3>();
-        var currentColors = new System.Collections.Generic.List<Color>();
-        var currentTriangles = new System.Collections.Generic.List<int>();
-        var currentVertexMap = new System.Collections.Generic.Dictionary<VertexData, int>();
-
         var meshIndex = 0;
 
-        // Iterate through sorted faces and create meshes in chunks
-        foreach (var face in allFaces)
+        // Iterate through leaf nodes of the Octree and create meshes
+        foreach (var leafNode in rootNode.GetLeafNodes())
         {
-            // Check if adding this triangle exceeds MAX_VERTICES_PER_CHUNK
-            if (currentVertexMap.Count + 3 > MAX_VERTICES_PER_CHUNK)
+            var currentVertices = new System.Collections.Generic.List<Vector3>();
+            var currentColors = new System.Collections.Generic.List<Color>();
+            var currentTriangles = new System.Collections.Generic.List<int>();
+            var currentVertexMap = new System.Collections.Generic.Dictionary<VertexData, int>();
+
+            foreach (var face in leafNode.faces)
             {
-                CreateMeshChunk(context, rootGameObject, currentVertices, currentColors, currentTriangles, material, meshIndex++);
-                currentVertices.Clear();
-                currentColors.Clear();
-                currentTriangles.Clear();
-                currentVertexMap.Clear();
+                // Check if adding this triangle exceeds MAX_VERTICES_PER_CHUNK
+                if (currentVertexMap.Count + 3 > MAX_VERTICES_PER_CHUNK)
+                {
+                    CreateMeshChunk(context, rootGameObject, currentVertices, currentColors, currentTriangles, material, meshIndex++);
+                    currentVertices.Clear();
+                    currentColors.Clear();
+                    currentTriangles.Clear();
+                    currentVertexMap.Clear();
+                }
+
+                // Add vertices and colors, remapping indices
+                var newV0 = AddVertex(currentVertices, currentColors, currentVertexMap, vertices[face.v0], face.color);
+                var newV1 = AddVertex(currentVertices, currentColors, currentVertexMap, vertices[face.v1], face.color);
+                var newV2 = AddVertex(currentVertices, currentColors, currentVertexMap, vertices[face.v2], face.color);
+
+                currentTriangles.Add(newV0);
+                currentTriangles.Add(newV1);
+                currentTriangles.Add(newV2);
             }
 
-            // Add vertices and colors, remapping indices
-            var newV0 = AddVertex(currentVertices, currentColors, currentVertexMap, vertices[face.v0], face.color);
-            var newV1 = AddVertex(currentVertices, currentColors, currentVertexMap, vertices[face.v1], face.color);
-            var newV2 = AddVertex(currentVertices, currentColors, currentVertexMap, vertices[face.v2], face.color);
-
-            currentTriangles.Add(newV0);
-            currentTriangles.Add(newV1);
-            currentTriangles.Add(newV2);
+            // Create the last mesh chunk for the current leaf node if there's any remaining data
+            if (currentTriangles.Count > 0)
+            {
+                CreateMeshChunk(context, rootGameObject, currentVertices, currentColors, currentTriangles, material, meshIndex);
+            }
+            meshIndex++;
         }
 
-        // Create the last mesh chunk if there's any remaining data
-        if (currentTriangles.Count > 0)
+        Debug.Log($"Successfully imported {context.assetPath} with {meshIndex} mesh chunks.");
+    }
+
+    private class OctreeNode
+    {
+        public Bounds bounds;
+        public System.Collections.Generic.List<FaceInfo> faces;
+        public OctreeNode[] children;
+        private int currentDepth;
+
+        public OctreeNode(Bounds bounds, int depth = 0)
         {
-            CreateMeshChunk(context, rootGameObject, currentVertices, currentColors, currentTriangles, material, meshIndex);
+            this.bounds = bounds;
+            this.faces = new System.Collections.Generic.List<FaceInfo>();
+            this.currentDepth = depth;
         }
 
-        Debug.Log($"Successfully imported {context.assetPath} with {meshIndex + 1} mesh chunks.");
+        public void AddFace(FaceInfo face)
+        {
+            faces.Add(face);
+        }
+
+        public void Build(int maxDepth, int maxFacesPerNode)
+        {
+            if (currentDepth >= maxDepth || faces.Count <= maxFacesPerNode)
+            {
+                return; // Stop subdivision
+            }
+
+            children = new OctreeNode[8];
+            Vector3 min = bounds.min;
+            Vector3 max = bounds.max;
+            Vector3 center = bounds.center;
+            Vector3 halfSize = bounds.extents;
+
+            // Create 8 children nodes
+            children[0] = new OctreeNode(new Bounds(center + new Vector3(-halfSize.x / 2, -halfSize.y / 2, -halfSize.z / 2), halfSize), currentDepth + 1); // --- (minX, minY, minZ)
+            children[1] = new OctreeNode(new Bounds(center + new Vector3( halfSize.x / 2, -halfSize.y / 2, -halfSize.z / 2), halfSize), currentDepth + 1); // +-- (maxX, minY, minZ)
+            children[2] = new OctreeNode(new Bounds(center + new Vector3(-halfSize.x / 2,  halfSize.y / 2, -halfSize.z / 2), halfSize), currentDepth + 1); // -+- (minX, maxY, minZ)
+            children[3] = new OctreeNode(new Bounds(center + new Vector3( halfSize.x / 2,  halfSize.y / 2, -halfSize.z / 2), halfSize), currentDepth + 1); // ++- (maxX, maxY, minZ)
+            children[4] = new OctreeNode(new Bounds(center + new Vector3(-halfSize.x / 2, -halfSize.y / 2,  halfSize.z / 2), halfSize), currentDepth + 1); // --+ (minX, minY, maxZ)
+            children[5] = new OctreeNode(new Bounds(center + new Vector3( halfSize.x / 2, -halfSize.y / 2,  halfSize.z / 2), halfSize), currentDepth + 1); // +-+ (maxX, minY, maxZ)
+            children[6] = new OctreeNode(new Bounds(center + new Vector3(-halfSize.x / 2,  halfSize.y / 2,  halfSize.z / 2), halfSize), currentDepth + 1); // -++ (minX, maxY, maxZ)
+            children[7] = new OctreeNode(new Bounds(center + new Vector3( halfSize.x / 2,  halfSize.y / 2,  halfSize.z / 2), halfSize), currentDepth + 1); // +++ (maxX, maxY, maxZ)
+
+            // Distribute faces to children
+            foreach (var face in faces)
+            {
+                for (int i = 0; i < 8; i++)
+                {
+                    if (children[i].bounds.Contains(face.centroid))
+                    {
+                        children[i].AddFace(face);
+                        break; // Assuming each face belongs to only one child node
+                    }
+                }
+            }
+            faces.Clear(); // Clear faces from parent node once distributed
+
+            // Recursively build children
+            foreach (var child in children)
+            {
+                child.Build(maxDepth, maxFacesPerNode);
+            }
+        }
+
+        public System.Collections.Generic.IEnumerable<OctreeNode> GetLeafNodes()
+        {
+            if (children == null)
+            {
+                yield return this;
+            }
+            else
+            {
+                foreach (var child in children)
+                {
+                    foreach (var leaf in child.GetLeafNodes())
+                    {
+                        yield return leaf;
+                    }
+                }
+            }
+        }
     }
 
     private void CreateMeshChunk(AssetImportContext context, GameObject parent, System.Collections.Generic.List<Vector3> chunkVertices, System.Collections.Generic.List<Color> chunkColors, System.Collections.Generic.List<int> chunkTriangles, Material material, int index)
