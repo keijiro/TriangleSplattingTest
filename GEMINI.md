@@ -1,17 +1,3 @@
-# Project Objectives
-
-This project aims to evaluate **Triangle Splatting**, a rendering technique
-recently published in a paper by Jan Held et al.
-
-You can find the original paper at `References/2505.19175v1.pdf`.
-
-You can find the reference implementation in `References/triangle-splatting`.
-
-The sample pretrained data files are available in `References/Pretrained`.
-
-Our goal is to implement a Triangle Splatting renderer for Unity's Universal
-Render Pipeline (URP) and assess its visual quality and performance.
-
 # Technology Choices
 
 - The project is built with Unity.
