@@ -28,10 +28,10 @@ then simply place this prefab into a scene to render it.
 
 ## About the Agentic Coding Experience
 
-A general guide ([GEMINI.md]) and a design document ([Design.md]) were prepared
-before the session. The development steps were then manually directed in the
-subsequent session with the Gemini CLI. The prompts used can be found in
-[Log.md].
+A general guide ([GEMINI.md](GEMINI.md)) and a design document
+([Design.md](Design.md)) were prepared before the session. The development steps
+were then manually directed in the subsequent session with the Gemini CLI. The
+prompts used can be found in [Log.md](Log.md).
 
 During the session, the free tier of the Gemini API was exhausted, so it fell
 back to using the `gemini-2.5-flash` model. While it sometimes entered
